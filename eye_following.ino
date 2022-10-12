@@ -16,10 +16,11 @@ Thanks to SparkFun and Nick Poole for the Grid-EYE Sensor code!
 
 #define SERVO_GPIO 26
 #define SERVO_CENTER 90
+#define SERVO_MAX_MOVEMENT 2
 
 #define MAX_NEGATIVE_RECALIBRATE_THRESHOLD 100
-#define MIN_TOTAL_EYE_FOLLOW_THRESHOLD 200
-#define MIN_COLUMN_EYE_FOLLOW_THRESHOLD 50
+#define MIN_TOTAL_EYE_FOLLOW_THRESHOLD 175
+#define MIN_COLUMN_EYE_FOLLOW_THRESHOLD 40
 #define MAX_POSITION_STEPS 2
 #define TO_ACTIVE_DELAY_MS 500
 #define TO_INACTIVE_DELAY_MS 5000
@@ -38,6 +39,8 @@ int calibrationTable[64];
 int mode = MODE_INACTIVE;
 unsigned long lastActiveTransitionMs = 0;
 int lastEyePositionIndex = -1;
+int targetServoPosition = SERVO_CENTER;
+int lastServoPosition = SERVO_CENTER;
 
 GridEYE grideye;
 Servo servo;
@@ -205,24 +208,45 @@ void updateMode(int eyePositionIndex) {
 }
 
 void updateServo(int mode, int eyePositionIndex) {
-  int servoPosition;
+  int targetServoPosition;
 
   switch(mode) {
     case MODE_INACTIVE:
     case MODE_GOING_ACTIVE:
-      servoPosition = SERVO_CENTER;
+      targetServoPosition = SERVO_CENTER;
       break;
     case MODE_GOING_INACTIVE:
-      servoPosition = eyePositions[lastEyePositionIndex];
+      targetServoPosition = eyePositions[lastEyePositionIndex];
       break;
     case MODE_ACTIVE:
-      servoPosition = eyePositions[eyePositionIndex];
+      if (eyePositionIndex >= 0 && lastEyePositionIndex >= 0 && abs(eyePositionIndex - lastEyePositionIndex) > MAX_POSITION_STEPS) {
+        // This eye position is too far from the last one. Disregard.
+        return;
+      }
+      targetServoPosition = eyePositions[eyePositionIndex];
       break;
     default:
-      servoPosition = SERVO_CENTER;
+      targetServoPosition = SERVO_CENTER;
   }
 
-  servo.write(servoPosition);
+  int error = targetServoPosition - lastServoPosition;
+  Serial.print(" E=");
+  Serial.print(error);
+  int newServoPosition;
+
+  if (error >= 0) {
+    newServoPosition = lastServoPosition + min(error, SERVO_MAX_MOVEMENT);
+  } else {
+    newServoPosition = lastServoPosition - min(-error, SERVO_MAX_MOVEMENT);
+  }
+
+  Serial.print(" S=");
+  Serial.print(newServoPosition);
+  Serial.print("/");
+  Serial.print(targetServoPosition);
+
+  servo.write(newServoPosition);
+  lastServoPosition = newServoPosition;
 }
 
 void loop() {
@@ -236,11 +260,6 @@ void loop() {
   Serial.print(totalDiff);
 
   int eyePositionIndex = calculateEyePosition();
-  if (eyePositionIndex >= 0 && lastEyePositionIndex >= 0 && abs(eyePositionIndex - lastEyePositionIndex) > MAX_POSITION_STEPS) {
-    // This eye position is too far from the last one. Disregard this result and continue next time.
-    Serial.println();
-    return;
-  }
 
   updateMode(eyePositionIndex);
   updateServo(mode, eyePositionIndex);
